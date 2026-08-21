@@ -136,7 +136,7 @@ Si hay conflicto en `CHANGELOG.md`, no fuerces el hunk viejo: agrega la línea b
 xcodegen generate
 xcodebuild -project HerdrM.xcodeproj -scheme HerdrM -configuration Debug \
   -derivedDataPath build build -skipPackagePluginValidation \
-  CODE_SIGN_IDENTITY="Apple Development" DEVELOPMENT_TEAM=JXGN27PTN9
+  CODE_SIGN_IDENTITY="Apple Development" DEVELOPMENT_TEAM=D2HZ8U62PA
 ```
 
 ```sh

@@ -75,3 +75,10 @@ worktree, Herdr conserva workspace + proceso idle zombie.
 4. Repo principal impecable: `git switch develop && git pull --ff-only`, `git branch -d` de las ramas
    del lote (seguro: solo borra mergeadas), árbol limpio.
 5. Las ramas `pr/*` con PR abierto en upstream **sobreviven** — se borran cuando missuo mergee.
+
+## Reconciliación de especificaciones (heredado de `/herdrm-flow`)
+
+Cada worker corre el **Paso 11.5** de `/herdrm-flow` sobre su propia `.specs/<slug>.md` antes
+de reportar cierre: la spec debe describir el código que existe, no el del Paso 1. El
+orquestador no acepta un cierre sin eso — en una ola de issues encadenados, la spec de uno es
+el punto de partida del siguiente, y una spec que miente se propaga a toda la serie.

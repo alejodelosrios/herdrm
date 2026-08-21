@@ -463,3 +463,70 @@ pero por otra causa. Tercera vez que el híbrido corre sin su agente y segunda c
 `> build · …`, no está usando tu agente, diga lo que diga el resto. Comprobar SIEMPRE esa línea
 en los primeros 200 bytes del log, y el watcher debe llevar `not found|not a primary` en su
 patrón de fallo.
+
+## 2026-08-21 — issue #9: verificar el RELANZAMIENTO, y los límites de `Commands`
+
+**Hice probar al usuario un binario viejo y saqué una conclusión falsa de ello.** Relancé la
+app, comprobé con `pgrep` que la ruta era la del worktree, y canté "corriendo el binario
+nuevo". Falso: la instancia anterior seguía viva, `open` solo la trajo al frente, y el
+proceso era 2 minutos ANTERIOR al binario. Encima llevaba una sonda a fichero que nunca
+escribió nada — y estuve a punto de concluir que el código no se ejecutaba, cuando lo que no
+se ejecutaba era el binario.
+**Verificación obligatoria, no basta la ruta**: comparar epoch de arranque del proceso contra
+mtime del binario, y esperar de verdad a que el proceso muera antes de `open`:
+```sh
+osascript -e 'quit app "herdrm"'
+for i in $(seq 10); do pgrep -f "MacOS/herdrm" >/dev/null || break; sleep 1; done
+BIN=$(stat -f %m "$APP/Contents/MacOS/herdrm")
+PROC=$(ps -p $(pgrep -f "MacOS/herdrm"|head -1) -o lstart= | xargs -I{} date -j -f "%a %b %d %T %Y" "{}" +%s)
+[ "$PROC" -gt "$BIN" ] || echo "estas probando el build viejo"
+```
+Corolario: una sonda a fichero que no escribe NO prueba que la línea no se ejecuta. Antes de
+esa conclusión, comprueba que el literal está en el binario (`strings … | grep`).
+
+**`Commands` de SwiftUI: dos límites distintos, medidos.**
+1. `@FocusedValue` de un `ObservableObject` da la REFERENCIA y `Commands` **no** se suscribe a
+   su `objectWillChange`. Leer `focusedModel?.algo` ahí se evalúa una vez y se queda pegado →
+   los ítems se quedaron deshabilitados con el split abierto, y **un `NSMenuItem` deshabilitado
+   no dispara su key equivalent**. Solución: publicar el dato como focused value de **tipo
+   valor** (`.focusedSceneValue(\.splitAxis, …)`), que sí invalida.
+2. Aun invalidando, `.disabled` **sí** se revalida al abrir el menú pero **el key equivalent ya
+   registrado en el `NSMenu` NO se reasigna**. Un `.keyboardShortcut(cond ? .upArrow : .leftArrow)`
+   se queda con la flecha del primer render. Solución: atajos FIJOS y `.disabled` por contexto.
+   No son el mismo mecanismo y no dan la misma garantía.
+
+**Un `.sheet` al cerrarse restaura el first responder anterior de la ventana padre**, y eso
+gana a cualquier `makeFirstResponder` que pidas durante el render. Se resuelve reaccionando a
+`NSWindow.didBecomeKeyNotification`, NO con un `asyncAfter` a ojo. Y el disparador tiene que
+ser el cierre del sheet, no el cambio del dato: elegir en el buscador la MISMA entrada que ya
+estaba no cambia su id y ningún `onChange` sobre el id se dispara.
+
+## 2026-08-21 — research del ⌃Tab: cerrado SIN issue (decisión de producto)
+
+Objetivo: hacer que ⌃Tab alterne entre los dos panes del split en vez de seguir hacia el
+sidebar. **Resultado: no se abre issue.** No hay defecto; es comportamiento estándar de macOS.
+
+- **Fuente primaria en disco**, mejor que cualquier doc:
+  `/System/Library/Frameworks/AppKit.framework/Resources/StandardKeyBinding.dict` →
+  `"^\t" => "selectNextKeyView:"` y `"^⇧\t" => "selectPreviousKeyView:"`. Así que ⌃Tab
+  **avanza** por el key view loop y no alterna: la "vuelta" que faltaba ya existe, es ⌃⇧Tab.
+  El Tab pelado no traversa porque SwiftTerm lo captura y lo manda al terminal como secuencia
+  de escape (`MacTerminalView.swift:1826`).
+- Nadie toca el loop: `grep -rn "nextKeyView|canBecomeKeyView|autorecalculatesKeyViewLoop"` en
+  `Sources/` y en el código Mac de SwiftTerm da **cero**. AppKit lo calcula solo y los dos
+  terminales declaran `acceptsFirstResponder = true` (`MacTerminalView.swift:1333`).
+- **Por qué se excluyó cablear un ciclo de 2 con `nextKeyView`**: (a) atrapa el foco — quien
+  entra en un terminal no puede salir al sidebar con teclado, y el repo tiene label
+  `accessibility` = "Barrier affecting people with disabilities"; (b)
+  `NSWindow.autorecalculatesKeyViewLoop` rehace el anillo cuando cambia la jerarquía, y aquí
+  cambia constantemente (attach recreado por tema y por agente, shell entrando y saliendo,
+  terminales independientes), así que habría que apagarlo y adueñarse del orden de foco de
+  TODA la ventana para siempre. Deuda permanente por una tecla.
+- Existía una opción intermedia que no atrapa el foco: ⌃Tab como ítem de menú con
+  `.disabled(focusedSplitAxis == nil)`, porque los key equivalents del menú ganan al key view
+  loop. Se descartó por producto, no por técnica: los ⌥⌘←/→ del #9 son direccionales e
+  idempotentes, que con dos panes es **mejor** que un toggle. Se deja para ver si algún
+  usuario lo pide.
+- Lección de método: un research puede cerrar sin issue y eso es un entregable, no un fracaso.
+  El informe + la tabla de exclusiones es lo que se conserva, para no reinvestigarlo dentro
+  de tres meses.

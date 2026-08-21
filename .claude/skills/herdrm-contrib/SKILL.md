@@ -28,11 +28,32 @@ cd ~/Sites/herdrm
 xcodegen generate
 xcodebuild -project HerdrM.xcodeproj -scheme HerdrM -configuration Debug \
   -derivedDataPath build build -skipPackagePluginValidation \
-  CODE_SIGN_IDENTITY="Apple Development" DEVELOPMENT_TEAM=JXGN27PTN9
+  CODE_SIGN_IDENTITY="Apple Development" DEVELOPMENT_TEAM=D2HZ8U62PA
 open build/Build/Products/Debug/herdrm.app
 ```
 
-Team `JXGN27PTN9` = the local "Apple Development: manuel@unit1gear.com" cert.
+Team `D2HZ8U62PA` = el `OU` del cert local "Apple Development: Manuel Ramirez",
+válido hasta abril de 2027.
+
+**El team ID es el campo `OU` del certificado, NO el paréntesis del nombre.** El
+paréntesis es el ID del cert y confunde: `Apple Development: Manuel Ramirez (LYF5NV372Q)`
+tiene `OU=D2HZ8U62PA`, y pasar `LYF5NV372Q` como `DEVELOPMENT_TEAM` falla.
+
+**Si el build falla con `No signing certificate "Mac Development" found ... with a private
+key`, sospecha caducidad antes que cualquier otra cosa.** El team anterior
+(`JXGN27PTN9`, cert "manuel@unit1gear.com") **caducó el 2026-08-21 a las 22:40:05 UTC**, en
+mitad de una sesión: el mismo comando compilaba verde y seis minutos después no. No es
+keychain bloqueado ni Xcode. Diagnóstico en un comando — lista los certs con su `OU` y su
+fecha real de caducidad, que `security find-identity` NO muestra:
+
+```sh
+security find-certificate -a -c "Apple Development" -p ~/Library/Keychains/login.keychain-db \
+  > /tmp/certs.pem
+# y por cada bloque:  openssl x509 -noout -subject -enddate
+```
+
+`security find-identity -v -p codesigning` miente por omisión aquí: lista una identidad como
+válida sin decir de qué team es ni cuándo expira.
 Re-derive it if it ever changes:
 `security find-certificate -c "Apple Development: manuel" -p | openssl x509 -noout -subject`
 (the `OU=` field is the team).

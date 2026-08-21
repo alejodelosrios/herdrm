@@ -35,7 +35,7 @@
   "dependencias_locales": [
     "servidor herdr corriendo (suites LocalSocket/LocalServer de HerdrKit)",
     "target SSH real kupavo@srv1759591 (RemoteSSHTests)",
-    "cert Apple Development, DEVELOPMENT_TEAM=JXGN27PTN9",
+    "cert Apple Development, DEVELOPMENT_TEAM=D2HZ8U62PA",
     "xcodegen (brew) + Xcode Metal Toolchain"
   ],
   "aislamiento": "in-place en flow; worktree de Herdr en fleet",

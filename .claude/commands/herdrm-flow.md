@@ -111,7 +111,7 @@ Tras cada Apply, antes de cualquier otra fase:
 ```bash
 xcodegen generate && xcodebuild -project HerdrM.xcodeproj -scheme HerdrM -configuration Debug \
   -derivedDataPath build build -skipPackagePluginValidation \
-  CODE_SIGN_IDENTITY="Apple Development" DEVELOPMENT_TEAM=JXGN27PTN9 2>&1 | grep -E 'error:|BUILD'
+  CODE_SIGN_IDENTITY="Apple Development" DEVELOPMENT_TEAM=D2HZ8U62PA 2>&1 | grep -E 'error:|BUILD'
 ```
 - No compila → devuélvele **el error textual** al builder. **Máximo 2 reintentos.**
 - 3er fallo → **fallback al subagente Claude `swift-builder`** (Sonnet). Anota el fallo en
@@ -169,6 +169,59 @@ git diff upstream/main -- 'Sources/*' 'Packages/*' | grep '^+' | grep -cE 'ponyt
 ```
 
 **DETENTE** por aprobación del humano antes de `gh pr create --repo missuo/herdrm --base main`.
+
+## Paso 11.5 — Reconciliar la especificación con lo que de verdad se construyó
+
+**Antes de cerrar, la `.specs/<slug>.md` tiene que describir el código que existe, no el que
+imaginaste en el Paso 1.** Un flujo largo cambia de diseño a mitad de vuelo: el auditor tumba
+un mecanismo, el gate manual descubre que un atajo no llega, un hallazgo obliga a invertir un
+criterio. Si eso no vuelve a la spec, queda un documento que miente — y en una serie por fases
+la spec de la fase 1 es el punto de partida de la 2.
+
+Recorre el diff final contra §2 y §3 y pregunta, decisión por decisión:
+
+- ¿Algún **mecanismo** de §2 se cambió por otro? (ejemplo real: `@AppStorage` en un
+  `ObservableObject` → `@Published` con `didSet`; cuatro ítems de menú con atajo dinámico →
+  ocho fijos con `.disabled` por eje). Reescribe el bullet con el mecanismo nuevo **y por qué
+  el anterior no servía** — ese "por qué" es lo que evita que el siguiente lo reintente.
+- ¿Alguna instrucción tuya resultó **estar mal**? Dilo en la spec marcándolo como corrección,
+  no la borres en silencio. (Ejemplo real: "aplica `.opacity` solo cuando hay split" era un
+  error: el `if` crea la rama de `_ConditionalContent` que destruye la identidad de la vista.)
+- ¿Cambió algún **criterio** por decisión del humano en el gate manual? Invierte el `Scenario`
+  y déjalo anotado como desvío aprobado, con fecha.
+- ¿Aparecieron **manual-gates nuevos** que no estaban en §3? Añádelos: son los que la próxima
+  fase va a heredar.
+- ¿Hay algo en el EXCLUIDO que ya **no** aplique, o algo nuevo que deba excluirse?
+
+Lo mismo con el **issue** (que sí es público) y con `CLAUDE.md` si el cambio movió algo que
+describe. Y si lo aprendido es del enjambre y no del producto —un watcher con un patrón que
+da falsos positivos, un agente mal configurado, una receta de firma caducada— va a
+`.swarm/lessons-learned.md` y al comando correspondiente, no a la spec.
+
+Regla práctica: si al leer la spec un builder nuevo escribiría algo distinto de lo que hay
+en el repo, la spec está desactualizada y el paso no está hecho.
+
+### Y en el mismo momento: veredicto de auditoría sobre el código FINAL
+
+**No se cierra nada sin un veredicto de auditoría del código que se va a mergear.** No vale el
+veredicto de una ronda anterior: si después de auditar entró un solo commit —incluido el
+arreglo del propio hallazgo del auditor, o cualquier cosa salida del gate manual— ese código
+**no está auditado** y hay que volver a pasarlo. Medido en el #9: la primera ronda dio DENEGADO
+y después entraron dos commits de código nuevo (el eje como focused value con ocho ítems de
+menú, y el foco tras el cierre del sheet) que nadie había revisado.
+
+Va aquí, junto a la reconciliación de la spec, y por el mismo motivo: son las dos cosas que se
+desincronizan cuando el flujo se alarga. El orden es: reconcilia la spec → lanza la auditoría
+final contra esa spec ya corregida → solo con **APROBADO** sigues al merge.
+
+Checklist del cierre, las tres a la vez:
+- [ ] `.specs/<slug>.md` describe el código que existe
+- [ ] veredicto **APROBADO** sobre el diff final completo (`git diff develop..HEAD`), no sobre
+      un estado intermedio
+- [ ] los `manual-gate` cerrados por el humano, sobre un binario **verificado** como el nuevo
+
+Si el veredicto es DENEGADO, arreglas y **vuelves a auditar**: el ciclo no se cierra con "ya lo
+arreglé". Y recuerda que reposo sin veredicto no es aprobación — ve a buscar el resultado.
 
 ## Paso 12 — Cierre
 Comentario en el issue con el PR, qué se marcó con qué evidencia, y qué queda sin marcar y quién lo
