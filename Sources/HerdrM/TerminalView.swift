@@ -503,6 +503,15 @@ final class LineBreakTerminalView: LocalProcessTerminalView {
     }
 }
 
+/// Puts the keyboard in a specific terminal, one runloop pass later so it lands after
+/// AppKit has finished its own first-responder bookkeeping for the current event.
+func focusTerminal(_ view: LocalProcessTerminalView?) {
+    DispatchQueue.main.async {
+        guard let view, let window = view.window else { return }
+        window.makeFirstResponder(view)
+    }
+}
+
 /// Hands the keyboard back to whichever terminal is left after a split closes. The
 /// shell view that held first responder is gone by then, and AppKit falls back to the
 /// window itself, which reads as a dead keyboard until the user clicks.
