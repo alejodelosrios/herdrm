@@ -30,10 +30,25 @@ private struct AppModelFocusedValueKey: FocusedValueKey {
     typealias Value = AppModel
 }
 
+/// The split axis travels as its own focused value, not read off the model. `Commands`
+/// gets the AppModel by reference and never subscribes to its objectWillChange, so
+/// `focusedModel?.shellSplitAxis` was evaluated once and stuck: the menu items stayed
+/// disabled with a split open, and a disabled NSMenuItem does not fire its key
+/// equivalent. A value type changes identity, which does invalidate the commands body —
+/// that is also what lets the shortcuts follow the current axis.
+private struct SplitAxisFocusedValueKey: FocusedValueKey {
+    typealias Value = SplitAxis
+}
+
 extension FocusedValues {
     var appModel: AppModel? {
         get { self[AppModelFocusedValueKey.self] }
         set { self[AppModelFocusedValueKey.self] = newValue }
+    }
+
+    var splitAxis: SplitAxis? {
+        get { self[SplitAxisFocusedValueKey.self] }
+        set { self[SplitAxisFocusedValueKey.self] = newValue }
     }
 }
 
@@ -42,6 +57,7 @@ struct HerdrMApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @AppStorage("app.theme") private var themePreference = "system"
     @FocusedValue(\.appModel) private var focusedModel
+    @FocusedValue(\.splitAxis) private var focusedSplitAxis
 
     private let updaterController: SPUStandardUpdaterController
 
@@ -100,34 +116,59 @@ struct HerdrMApp: App {
 
                 Divider()
 
-                // Four commands, not eight: the shortcut follows the current axis, so the
-                // menu never shows two rows with the same name. Focus is DIRECTIONAL —
-                // ⌥⌘←/↑ always lands on the agent, ⌥⌘→/↓ always on the shell — not a
-                // toggle, so repeating a key is idempotent instead of ping-ponging.
-                Button("Focus Agent Pane") {
+                // Eight items with FIXED shortcuts, enabled per axis — deliberately not
+                // four items whose shortcut follows the axis. Measured: `.disabled` IS
+                // revalidated when the menu opens, but a key equivalent already registered
+                // in the NSMenu is NOT reassigned when the commands body re-evaluates, so
+                // the arrows stayed frozen on the axis that was current at launch.
+                // Labels name the direction so no two rows read the same.
+                //
+                // Focus is directional and idempotent: the left/top pane is always the
+                // agent, the right/bottom one always the shell.
+                Button("Focus Left Pane") {
                     if let model = focusedModel { focusSplitSide(.agent, in: model) }
                 }
-                .keyboardShortcut(splitIsHorizontal ? .upArrow : .leftArrow, modifiers: [.command, .option])
-                .disabled(focusedModel?.shellSplitAxis == nil)
-                Button("Focus Shell Pane") {
+                .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                .disabled(focusedSplitAxis != .vertical)
+                Button("Focus Right Pane") {
                     if let model = focusedModel { focusSplitSide(.shell, in: model) }
                 }
-                .keyboardShortcut(splitIsHorizontal ? .downArrow : .rightArrow, modifiers: [.command, .option])
-                .disabled(focusedModel?.shellSplitAxis == nil)
+                .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                .disabled(focusedSplitAxis != .vertical)
+                Button("Focus Top Pane") {
+                    if let model = focusedModel { focusSplitSide(.agent, in: model) }
+                }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+                .disabled(focusedSplitAxis != .horizontal)
+                Button("Focus Bottom Pane") {
+                    if let model = focusedModel { focusSplitSide(.shell, in: model) }
+                }
+                .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+                .disabled(focusedSplitAxis != .horizontal)
 
                 Divider()
 
                 // Resize moves the divider by 5% relative to the active pane.
-                Button("Grow Split") {
+                Button("Widen Active Pane") {
                     if let model = focusedModel { resizeSplit(grow: true, in: model) }
                 }
-                .keyboardShortcut(splitIsHorizontal ? .downArrow : .rightArrow, modifiers: [.command, .control])
-                .disabled(focusedModel?.shellSplitAxis == nil)
-                Button("Shrink Split") {
+                .keyboardShortcut(.rightArrow, modifiers: [.command, .control])
+                .disabled(focusedSplitAxis != .vertical)
+                Button("Narrow Active Pane") {
                     if let model = focusedModel { resizeSplit(grow: false, in: model) }
                 }
-                .keyboardShortcut(splitIsHorizontal ? .upArrow : .leftArrow, modifiers: [.command, .control])
-                .disabled(focusedModel?.shellSplitAxis == nil)
+                .keyboardShortcut(.leftArrow, modifiers: [.command, .control])
+                .disabled(focusedSplitAxis != .vertical)
+                Button("Grow Active Pane") {
+                    if let model = focusedModel { resizeSplit(grow: true, in: model) }
+                }
+                .keyboardShortcut(.downArrow, modifiers: [.command, .control])
+                .disabled(focusedSplitAxis != .horizontal)
+                Button("Shrink Active Pane") {
+                    if let model = focusedModel { resizeSplit(grow: false, in: model) }
+                }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .control])
+                .disabled(focusedSplitAxis != .horizontal)
             }
             CommandGroup(replacing: .saveItem) {
                 // ⌘W closes the most local thing first: the split, then the
@@ -165,8 +206,6 @@ struct HerdrMApp: App {
     }
 
     // MARK: - Split commands
-
-    private var splitIsHorizontal: Bool { focusedModel?.shellSplitAxis == .horizontal }
 
     private func focusSplitSide(_ side: SplitSide, in model: AppModel) {
         guard model.shellSplitAxis != nil else { return }
