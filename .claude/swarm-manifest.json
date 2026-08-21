@@ -1,0 +1,73 @@
+{
+  "proyecto": "herdrm",
+  "descripcion": "Consola nativa macOS para herdr (SwiftUI + SPM HerdrKit). Fork de missuo/herdrm; el objetivo es contribuir PRs upstream.",
+  "arquetipo": "B",
+  "motor_apply": {
+    "primario": "opencode:opencode-go/kimi-k2.7-code",
+    "docs": "opencode:opencode-go/mimo-v2.5",
+    "fallback": "claude:sonnet (agente swift-builder)",
+    "regla_fallback": "3er fallo del gate de compilacion",
+    "descartados": {
+      "opencode-go/deepseek-v4-pro": "requiere opt-in explicito de hosting en China; el opt-in es a nivel cuenta y contaminaria kupavo (codigo propietario)",
+      "opencode-go/deepseek-v4-flash": "mismo candado"
+    }
+  },
+  "tiering": {
+    "orquestador": "opus",
+    "research": "opus",
+    "pm_hijo_fleet": "sonnet",
+    "auditor": "opus",
+    "qa": "sonnet",
+    "docs": "opencode:mimo-v2.5"
+  },
+  "rama_base": "develop",
+  "ramas": {
+    "main": "espejo de upstream/main + el enjambre (.claude/)",
+    "develop": "integracion; sale de main; base de todo feat/fix",
+    "trabajo": "feat/* | fix/* desde develop",
+    "publicacion": "pr/* generada desde upstream/main excluyendo .claude/ y .swarm/"
+  },
+  "merge_gate": "local: xcodegen + xcodebuild Debug + swift test. SIN CI de GitHub por decision del dueno; la regla la hace cumplir el PM.",
+  "gate_humano_final": "aprobacion antes de abrir el PR a missuo/herdrm",
+  "issues_repo": "alejodelosrios/herdrm",
+  "issues_upstream_readonly": "missuo/herdrm",
+  "hardware_en_loop": false,
+  "dependencias_locales": [
+    "servidor herdr corriendo (suites LocalSocket/LocalServer de HerdrKit)",
+    "target SSH real kupavo@srv1759591 (RemoteSSHTests)",
+    "cert Apple Development, DEVELOPMENT_TEAM=JXGN27PTN9",
+    "xcodegen (brew) + Xcode Metal Toolchain"
+  ],
+  "aislamiento": "in-place en flow; worktree de Herdr en fleet",
+  "provision_worktree": ["xcodegen generate (HerdrM.xcodeproj e Info.plist son gitignored)"],
+  "fleet": {
+    "cableado": true,
+    "olas_max": 3,
+    "razon_limite": "rate-limit compartido de OpenCode Go + xcodebuild pesado en CPU/disco/cache SwiftPM",
+    "hotspots": ["Sources/HerdrM/ContentView.swift", "Sources/HerdrM/AppModel.swift"]
+  },
+  "ramas_sobreviven_fleet": true,
+  "spec": "ninguna (CLAUDE.md del autor upstream es el brief canonico)",
+  "codegraph": false,
+  "intensidad_auditoria": "1 pasada adversaria, opus, binaria",
+  "comandos": ["herdrm-research", "herdrm-issue", "herdrm-flow", "herdrm-fleet", "herdrm-sync"],
+  "agentes": {
+    "claude": ["auditor", "qa", "swift-builder", "docs"],
+    "opencode": ["swift-builder", "docs-writer"]
+  },
+  "skills_externos": {
+    "mattpocock:research": "fuentes primarias, agente en background",
+    "mattpocock:to-tickets": "tracer bullets, blocking edges, quiz, expand-contract",
+    "herdrm-contrib": "skill local con la receta de build y el flujo de PR"
+  },
+  "guia_fuente": "~/.claude/docs/herdrm-swarm-guia.md",
+  "guia_vault": "OBSIDIAN_VAULT/MY_NOTES/Personal/herdrm-swarm-guia.md",
+  "notas_variacion": [
+    "No somos maintainers: el gate final no es un merge propio sino un PR a un repo ajeno. De ahi la fase Publish, que exporta el diff sin el enjambre.",
+    "Divergencia deliberada de mattpocock:to-tickets: SI se incluyen file:line y snippets en los issues, porque el ejecutor es un modelo externo barato que sin ellos alucina la API de SwiftUI. Se compensa con el sello de fecha y la re-verificacion si el arbol se movio.",
+    "Sin CI de GitHub para develop por decision explicita del dueno: el gate es 100% local.",
+    "Los builders de opencode se lanzan SIEMPRE en background con watcher por nivel e interruptor de hombre muerto a 4 min. En foreground son ciegos (headless no reporta agent_status).",
+    "Dogfooding: el enjambre corre en Herdr y el producto ES la consola de Herdr.",
+    "La API key de MiMo esta en texto plano en ~/.config/opencode/opencode.jsonc. OpenCode Go usa auth.json. Rotar la de MiMo si ese archivo se sincroniza a algun repo."
+  ]
+}

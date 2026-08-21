@@ -1,0 +1,410 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index fb312e7..3b10dff 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -7,6 +7,13 @@ the Sparkle update description — a release without a section here fails CI.
+ 
+ ## [Unreleased]
+ 
++### Added
++- The terminal pane can now split to run a local login shell alongside the
++  agent attach — ⌘D splits vertically, ⇧⌘D horizontally, and the divider
++  drags with a persisted ratio. ⌘W closes the split first and only closes the
++  window once it's gone. First phase of a series; keyboard focus/resize
++  controls and a remote shell over SSH follow in later issues.
++
+ ## [0.3.9] - 2026-08-21
+ 
+ ### Changed
+diff --git a/Sources/HerdrM/AppModel.swift b/Sources/HerdrM/AppModel.swift
+index 4a29f37..4417625 100644
+--- a/Sources/HerdrM/AppModel.swift
++++ b/Sources/HerdrM/AppModel.swift
+@@ -38,6 +38,9 @@ struct SSHAuthenticationRequest: Identifiable {
+     var id: UUID { deviceID }
+ }
+ 
++/// vertical = panes lado a lado, divisor vertical (convención iTerm2).
++enum SplitAxis { case vertical, horizontal }
++
+ @MainActor
+ final class AppModel: ObservableObject {
+     @Published var devices: [Device]
+@@ -51,6 +54,7 @@ final class AppModel: ObservableObject {
+     @Published var showNewAgent = false
+     @Published var showNewSpace = false
+     @Published var showSearch = false
++    @Published var shellSplitAxis: SplitAxis?
+     /// In-window device panel (NSPopover crashes in ViewBridge on macOS 26+ betas).
+     @Published var showDevicePanel = false
+     @Published var deviceToEdit: Device?
+diff --git a/Sources/HerdrM/ContentView.swift b/Sources/HerdrM/ContentView.swift
+index 2311148..262c8a2 100644
+--- a/Sources/HerdrM/ContentView.swift
++++ b/Sources/HerdrM/ContentView.swift
+@@ -203,6 +203,7 @@ struct DetailView: View {
+     @AppStorage(TerminalDefaults.fontWeightKey) private var terminalFontWeight = TerminalDefaults.defaultFontWeight
+     @AppStorage(TerminalDefaults.lineSpacingKey) private var terminalLineSpacing = TerminalDefaults.defaultLineSpacing
+     @AppStorage("terminal.mouseReporting") private var terminalMouseReporting = true
++    @AppStorage("terminal.splitRatio") private var splitRatio = 0.5
+     @Environment(\.colorScheme) private var colorScheme
+     /// The entry whose attach process exited, and how. Keyed by entry id so a stale
+     /// exit from a previously selected pane never covers a live terminal.
+@@ -214,15 +215,39 @@ struct DetailView: View {
+     @ViewBuilder
+     private var terminal: some View {
+         if let entry = model.selectedEntry {
+-            ZStack {
+-                AttachTerminalView(
+-                    device: entry.device,
+-                    paneID: entry.agent.paneID,
+-                    serverVersion: model.serverVersion(deviceID: entry.device.id),
+-                    attachmentCapabilities: model.attachmentCapabilities(
+-                        deviceID: entry.device.id,
+-                        agentKind: entry.agent.agentKindRaw
+-                    ),
++            SplitContainer(axis: model.shellSplitAxis, ratio: $splitRatio) {
++                ZStack {
++                    AttachTerminalView(
++                        device: entry.device,
++                        paneID: entry.agent.paneID,
++                        serverVersion: model.serverVersion(deviceID: entry.device.id),
++                        attachmentCapabilities: model.attachmentCapabilities(
++                            deviceID: entry.device.id,
++                            agentKind: entry.agent.agentKindRaw
++                        ),
++                        fontName: terminalFontName,
++                        fontSize: terminalFontSize,
++                        thinStrokes: terminalThinStrokes,
++                        fontWeight: terminalFontWeight,
++                        lineSpacing: terminalLineSpacing,
++                        dark: colorScheme == .dark,
++                        mouseReporting: terminalMouseReporting,
++                        onAttachmentError: { model.actionError = $0 },
++                        onAttachmentUploadingChanged: { uploadingAttachment = $0 },
++                        onExit: { code in
++                            endedAttachKey = entry.id
++                            endedAttachCode = code
++                        }
++                    )
++                        .id("attach-\(entry.id)-\(colorScheme)-\(attachRetry)")
++                        .padding(.horizontal, 10)
++                        .padding(.vertical, 8)
++                    if endedAttachKey == entry.id {
++                        attachEndedOverlay(entry)
++                    }
++                }
++            } second: {
++                ShellTerminalView(
+                     fontName: terminalFontName,
+                     fontSize: terminalFontSize,
+                     thinStrokes: terminalThinStrokes,
+@@ -230,19 +255,15 @@ struct DetailView: View {
+                     lineSpacing: terminalLineSpacing,
+                     dark: colorScheme == .dark,
+                     mouseReporting: terminalMouseReporting,
+-                    onAttachmentError: { model.actionError = $0 },
+-                    onAttachmentUploadingChanged: { uploadingAttachment = $0 },
+-                    onExit: { code in
+-                        endedAttachKey = entry.id
+-                        endedAttachCode = code
+-                    }
++                    onExit: { _ in model.shellSplitAxis = nil }
+                 )
+-                    .id("attach-\(entry.id)-\(colorScheme)-\(attachRetry)")
++                    // Deliberately not keyed on colorScheme like the attach above:
++                    // a new id tears the view down and kills the shell with whatever
++                    // was running in it, and unlike a herdr pane a local shell has no
++                    // server-side state to reattach to. updateNSView re-themes it.
++                    .id("shell")
+                     .padding(.horizontal, 10)
+                     .padding(.vertical, 8)
+-                if endedAttachKey == entry.id {
+-                    attachEndedOverlay(entry)
+-                }
+             }
+             .frame(maxWidth: .infinity, maxHeight: .infinity)
+             .background(Theme.terminalBackground)
+diff --git a/Sources/HerdrM/HerdrMApp.swift b/Sources/HerdrM/HerdrMApp.swift
+index 462c36b..55bfc4d 100644
+--- a/Sources/HerdrM/HerdrMApp.swift
++++ b/Sources/HerdrM/HerdrMApp.swift
+@@ -83,6 +83,26 @@ struct HerdrMApp: App {
+                     updaterController.checkForUpdates(nil)
+                 }
+             }
++
++            CommandMenu("Terminal") {
++                Button("Split Vertically") { focusedModel?.shellSplitAxis = .vertical }
++                    .keyboardShortcut("d", modifiers: .command)
++                    .disabled(focusedModel == nil)
++                Button("Split Horizontally") { focusedModel?.shellSplitAxis = .horizontal }
++                    .keyboardShortcut("d", modifiers: [.command, .shift])
++                    .disabled(focusedModel == nil)
++            }
++            CommandGroup(replacing: .saveItem) {
++                // ⌘W prioriza el split — mismo trade-off que ⌘N con New Agent.
++                Button(focusedModel?.shellSplitAxis != nil ? "Close Split" : "Close") {
++                    if let model = focusedModel, model.shellSplitAxis != nil {
++                        model.shellSplitAxis = nil
++                    } else {
++                        NSApp.keyWindow?.performClose(nil)
++                    }
++                }
++                .keyboardShortcut("w", modifiers: .command)
++            }
+         }
+ 
+         Settings {
+diff --git a/Sources/HerdrM/SplitContainer.swift b/Sources/HerdrM/SplitContainer.swift
+new file mode 100644
+index 0000000..705e8df
+--- /dev/null
++++ b/Sources/HerdrM/SplitContainer.swift
+@@ -0,0 +1,90 @@
++import AppKit
++import SwiftUI
++
++/// A two-pane split with a draggable divider and a persisted ratio. `axis == nil`
++/// renders `first()` alone, with no `GeometryReader` and no extra modifiers — zero
++/// behavior change when there is no split.
++struct SplitContainer<First: View, Second: View>: View {
++    let axis: SplitAxis?
++    @Binding var ratio: Double
++    @ViewBuilder var first: () -> First
++    @ViewBuilder var second: () -> Second
++
++    /// The ratio when the current drag began. `DragGesture.translation` is a delta,
++    /// so the divider follows the mouse from wherever it was; `location` would be
++    /// measured against the divider's own origin, not the container's, and make the
++    /// divider jump on mouse-down.
++    @State private var dragStartRatio: Double?
++
++    var body: some View {
++        if let axis {
++            GeometryReader { proxy in
++                let total = axis == .vertical ? proxy.size.width : proxy.size.height
++                let firstLength = total * SplitContainerRatioBounds.clamp(ratio)
++                Group {
++                    if axis == .vertical {
++                        HStack(spacing: 0) {
++                            first().frame(width: firstLength)
++                            divider(axis: axis, total: total)
++                            second().frame(maxWidth: .infinity, maxHeight: .infinity)
++                        }
++                    } else {
++                        VStack(spacing: 0) {
++                            first().frame(height: firstLength)
++                            divider(axis: axis, total: total)
++                            second().frame(maxWidth: .infinity, maxHeight: .infinity)
++                        }
++                    }
++                }
++                // ponytail: a gesture cancelled without onEnded leaves a stale
++                // anchor; clearing on axis change covers the case that shows.
++                .onChange(of: axis) { _, _ in dragStartRatio = nil }
++            }
++        } else {
++            first()
++        }
++    }
++
++    private func divider(axis: SplitAxis, total: CGFloat) -> some View {
++        Rectangle()
++            .fill(Theme.hairline)
++            .frame(width: axis == .vertical ? 1 : nil, height: axis == .horizontal ? 1 : nil)
++            .overlay(
++                Rectangle()
++                    .fill(.clear)
++                    .frame(width: axis == .vertical ? 7 : nil, height: axis == .horizontal ? 7 : nil)
++                    .contentShape(Rectangle())
++                    .gesture(
++                        DragGesture()
++                            .onChanged { value in
++                                guard total > 0 else { return }
++                                let start = dragStartRatio ?? SplitContainerRatioBounds.clamp(ratio)
++                                if dragStartRatio == nil { dragStartRatio = start }
++                                let travelled = axis == .vertical
++                                    ? value.translation.width
++                                    : value.translation.height
++                                ratio = SplitContainerRatioBounds.clamp(start + travelled / total)
++                            }
++                            .onEnded { _ in dragStartRatio = nil }
++                    )
++                    // set() instead of push()/pop(): closing the split with the
++                    // pointer over the divider never delivers onHover(false), and an
++                    // unbalanced push leaves the resize cursor stuck app-wide.
++                    .onHover { hovering in
++                        if hovering {
++                            (axis == .vertical ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).set()
++                        } else {
++                            NSCursor.arrow.set()
++                        }
++                    }
++            )
++    }
++}
++
++private enum SplitContainerRatioBounds {
++    static let bounds = 0.2...0.8
++
++    static func clamp(_ value: Double) -> Double {
++        Swift.min(Swift.max(value, bounds.lowerBound), bounds.upperBound)
++    }
++}
+diff --git a/Sources/HerdrM/TerminalView.swift b/Sources/HerdrM/TerminalView.swift
+index e00f564..b147534 100644
+--- a/Sources/HerdrM/TerminalView.swift
++++ b/Sources/HerdrM/TerminalView.swift
+@@ -568,32 +568,16 @@ struct AttachTerminalView: NSViewRepresentable {
+     }
+ 
+     private func configureAppearance(_ view: LocalProcessTerminalView) {
+-        let font = TerminalDefaults.font(name: fontName, size: fontSize, weight: fontWeight)
+-        if view.font != font {
+-            view.font = font
+-        }
+-        view.allowMouseReporting = mouseReporting
+-        // Compared against the inverted value on purpose: thinStrokes on means
+-        // smoothing off. The setter only stores the flag, so repaint by hand.
+-        if view.fontSmoothing == thinStrokes {
+-            view.fontSmoothing = !thinStrokes
+-            view.needsDisplay = true
+-        }
+-        // This setter calls resetFont(), which recomputes metrics and resizes the
+-        // terminal, so it is only assigned when it actually changes.
+-        if view.lineSpacing != CGFloat(lineSpacing) {
+-            view.lineSpacing = CGFloat(lineSpacing)
+-        }
+-        // Everything below is theme-only and returns early; keep font work above it.
+-        guard let view = view as? LineBreakTerminalView,
+-              view.appliedDarkAppearance != dark
+-        else { return }
+-        view.appliedDarkAppearance = dark
+-        view.usesLightColors = !dark
+-        view.nativeBackgroundColor = dark ? TerminalDefaults.darkBackground : TerminalDefaults.lightBackground
+-        view.nativeForegroundColor = dark ? TerminalDefaults.darkForeground : TerminalDefaults.lightForeground
+-        view.installColors(dark ? TerminalDefaults.darkPalette : TerminalDefaults.lightPalette)
+-        view.needsDisplay = true
++        applyTerminalAppearance(
++            view,
++            fontName: fontName,
++            fontSize: fontSize,
++            thinStrokes: thinStrokes,
++            fontWeight: fontWeight,
++            lineSpacing: lineSpacing,
++            dark: dark,
++            mouseReporting: mouseReporting
++        )
+     }
+ 
+     final class Coordinator: NSObject, LocalProcessTerminalViewDelegate {
+@@ -627,3 +611,108 @@ struct AttachTerminalView: NSViewRepresentable {
+         }
+     }
+ }
++
++func applyTerminalAppearance(
++    _ view: LocalProcessTerminalView,
++    fontName: String, fontSize: Double, thinStrokes: Bool,
++    fontWeight: Double, lineSpacing: Double, dark: Bool, mouseReporting: Bool
++) {
++    let font = TerminalDefaults.font(name: fontName, size: fontSize, weight: fontWeight)
++    if view.font != font {
++        view.font = font
++    }
++    view.allowMouseReporting = mouseReporting
++    // Compared against the inverted value on purpose: thinStrokes on means
++    // smoothing off. The setter only stores the flag, so repaint by hand.
++    if view.fontSmoothing == thinStrokes {
++        view.fontSmoothing = !thinStrokes
++        view.needsDisplay = true
++    }
++    // This setter calls resetFont(), which recomputes metrics and resizes the
++    // terminal, so it is only assigned when it actually changes.
++    if view.lineSpacing != CGFloat(lineSpacing) {
++        view.lineSpacing = CGFloat(lineSpacing)
++    }
++    // Everything below is theme-only and returns early; keep font work above it.
++    guard let view = view as? LineBreakTerminalView,
++          view.appliedDarkAppearance != dark
++    else { return }
++    view.appliedDarkAppearance = dark
++    view.usesLightColors = !dark
++    view.nativeBackgroundColor = dark ? TerminalDefaults.darkBackground : TerminalDefaults.lightBackground
++    view.nativeForegroundColor = dark ? TerminalDefaults.darkForeground : TerminalDefaults.lightForeground
++    view.installColors(dark ? TerminalDefaults.darkPalette : TerminalDefaults.lightPalette)
++    view.needsDisplay = true
++}
++
++/// A local login shell, side by side with the agent attach — no herdr pane, no
++/// attachment paste, no first-responder grab (the agent keeps focus after a split).
++struct ShellTerminalView: NSViewRepresentable {
++    var fontName: String = ""
++    var fontSize: Double = TerminalDefaults.defaultFontSize
++    var thinStrokes: Bool = true
++    var fontWeight: Double = TerminalDefaults.defaultFontWeight
++    var lineSpacing: Double = TerminalDefaults.defaultLineSpacing
++    var dark: Bool = false
++    var mouseReporting: Bool = true
++    var onExit: ((Int32?) -> Void)? = nil
++
++    func makeCoordinator() -> Coordinator { Coordinator() }
++
++    func makeNSView(context: Context) -> LocalProcessTerminalView {
++        let view = LineBreakTerminalView(frame: .zero)
++        view.processDelegate = context.coordinator
++        context.coordinator.onExit = onExit
++        applyTerminalAppearance(
++            view,
++            fontName: fontName,
++            fontSize: fontSize,
++            thinStrokes: thinStrokes,
++            fontWeight: fontWeight,
++            lineSpacing: lineSpacing,
++            dark: dark,
++            mouseReporting: mouseReporting
++        )
++
++        var environment = Terminal.getEnvironmentVariables(termName: "xterm-256color")
++        environment.append("LANG=en_US.UTF-8")
++        view.startProcess(
++            executable: "/bin/sh",
++            args: ["-c", "cd \"$HOME\"; exec \"${SHELL:-/bin/zsh}\" -l"],
++            environment: environment
++        )
++        return view
++    }
++
++    func updateNSView(_ nsView: LocalProcessTerminalView, context: Context) {
++        context.coordinator.onExit = onExit
++        applyTerminalAppearance(
++            nsView,
++            fontName: fontName,
++            fontSize: fontSize,
++            thinStrokes: thinStrokes,
++            fontWeight: fontWeight,
++            lineSpacing: lineSpacing,
++            dark: dark,
++            mouseReporting: mouseReporting
++        )
++    }
++
++    static func dismantleNSView(_ nsView: LocalProcessTerminalView, coordinator: Coordinator) {
++        coordinator.onExit = nil
++        nsView.terminate()
++    }
++
++    final class Coordinator: NSObject, LocalProcessTerminalViewDelegate {
++        var onExit: ((Int32?) -> Void)?
++
++        func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
++        func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}
++        func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
++        func processTerminated(source: TerminalView, exitCode: Int32?) {
++            let callback = onExit
++            onExit = nil  // report once
++            DispatchQueue.main.async { callback?(exitCode) }
++        }
++    }
++}
