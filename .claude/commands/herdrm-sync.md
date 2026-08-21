@@ -41,8 +41,32 @@ gh pr list --repo missuo/herdrm --author alejodelosrios --state all \
   --json number,title,state,headRefName,mergedAt
 ```
 
-Cruza contra las ramas locales `pr/*` (`git branch --list 'pr/*'`). Toda rama con PR
-`MERGED` no necesita nada más — bórrala si ya no sirve de referencia.
+Cruza contra las ramas `pr/*` **locales Y las de `origin`** — el paso se olvidaba de las
+remotas y se acumulaban en el fork. Una rama cuyo PR está `MERGED` (o `CLOSED`) no aporta
+nada: missuo mergea con **squash**, así que tu commit no sobrevive igual arriba, y GitHub
+conserva los commits referenciados por el PR, de modo que borrar la rama **no** rompe el PR
+ni su diff. Lo que sí rompe es borrar la de un PR `OPEN`: GitHub lo cierra.
+
+Automatizable con la comprobación de seguridad dentro — nunca borres por nombre a ciegas:
+
+```sh
+gh pr list --repo missuo/herdrm --author alejodelosrios --state all \
+  --json number,state,headRefName \
+  --jq '.[] | select(.state != "OPEN") | .headRefName' | sort -u > /tmp/pr-cerradas
+# local
+git branch --list 'pr/*' | tr -d ' ' | while read b; do
+  grep -qx "$b" /tmp/pr-cerradas && git branch -d "$b"
+done
+# origin
+git branch -r --list 'origin/pr/*' | sed 's|.*origin/||' | while read b; do
+  grep -qx "$b" /tmp/pr-cerradas && git push origin --delete "$b"
+done
+git fetch --prune origin
+git branch --list 'pr/*'; git branch -r --list 'origin/pr/*'   # solo deben quedar las de PRs OPEN
+```
+
+El `select(.state != "OPEN")` es el seguro: sin él, un `pr/*` con revisión en curso se
+borraría y cerraría el PR. Y `git branch -d` (no `-D`) da una segunda red en local.
 
 Después, censa `develop` en busca de commits que **no** estén en ninguna rama `pr/*` ni en
 `upstream/main` — trabajo hecho después de la última sync que aún no se propuso arriba:
