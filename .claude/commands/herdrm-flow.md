@@ -32,13 +32,38 @@ está gitignored: es andamiaje, no viaja al repo. Sin esta especificación no se
 También si te saltaste el aislamiento porque venías de un fleet con rama ya creada.
 `gh issue edit` puede devolver 0 sin mutar → **relee y confirma**.
 
-## Paso 3 — Aislar
-Rama desde **`develop`**: `git switch -c <feat|fix>/<slug> develop`.
-En fleet: worktree de Herdr; el orquestador lo crea. El worktree NO trae `HerdrM.xcodeproj` ni
-`Sources/HerdrM/Info.plist` (gitignored, los genera xcodegen) → **corre `xcodegen generate` antes de
-cualquier build** o el gate revienta. `.specs/` tampoco viaja al worktree (gitignored) → copia
-`.specs/<slug>.md` al worktree antes del Apply. No hay `.env` que copiar; el cert vive en el keychain y está
-disponible en cualquier worktree.
+## Paso 3 — Aislar: SIEMPRE en tu propio worktree
+
+**Nunca `git switch` en el checkout principal.** No es tuyo: otra sesión puede estar dentro, y un
+`switch` le cambia el árbol bajo los pies **sin error para ninguna de las dos**. Medido el
+2026-08-19: dos sesiones en `~/Sites/herdrm`, una se llevó el checkout a la rama de la otra a mitad
+de faena. Reincidencia el 2026-08-21 en el #8: el PM hizo `switch` en el principal teniendo otra
+sesión viva sobre el repo — salió bien por suerte, no por método.
+
+Censo antes de tocar nada — barato y obligatorio:
+
+```bash
+git worktree list                      # ¿quién tiene qué?
+git status --short                     # ¿árbol ajeno sucio? entonces NO es tuyo
+git reflog -5 --format='%gd %gs'       # ¿alguien movió HEAD hace minutos?
+```
+Y `ListAgents`: una sesión **busy** sobre este repo es una sesión que está escribiendo.
+
+Aísla con worktree, no con switch:
+
+```bash
+git fetch origin
+git worktree add ../herdrm-<slug> -b <feat|fix>/<slug> develop
+cd ../herdrm-<slug>
+xcodegen generate     # OBLIGATORIO: el worktree no trae .xcodeproj
+```
+
+El worktree NO trae `HerdrM.xcodeproj` ni `Sources/HerdrM/Info.plist` (gitignored, los genera
+xcodegen) → **corre `xcodegen generate` antes de cualquier build** o el gate revienta. `.specs/`
+tampoco viaja al worktree (gitignored) → copia `.specs/<slug>.md` al worktree antes del Apply. No hay
+`.env` que copiar; el cert vive en el keychain y está disponible en cualquier worktree.
+
+En fleet el worktree lo crea el orquestador (`herdr worktree add`) y te lo pasa hecho: no crees otro.
 
 ## Paso 4 — Apply: builders en background, NUNCA en foreground
 
@@ -133,6 +158,16 @@ git diff --name-only upstream/main | grep -cE '^\.claude/|^\.swarm/|^\.opencode/
 ```
 Añade el bullet a `CHANGELOG.md` bajo `## [Unreleased]` — el CI de release lo extrae o truena; no
 inventes un heading de versión, solo el maintainer taggea.
+Antes de abrir el PR, dos `grep` que missuo tuvo que arreglar a mano en el #8 — comentarios en
+español y el marcador de la sesión colados en el fuente de upstream:
+
+```bash
+# comentarios no ingleses en el codigo que viaja: DEBE dar 0
+git diff upstream/main --  'Sources/*' 'Packages/*' | grep '^+' | grep -nE '[áéíóúñ¿¡]|// (el|la|los|las|que|si|para|no) ' | wc -l
+# nombres en clave de sesion o modo: DEBE dar 0
+git diff upstream/main -- 'Sources/*' 'Packages/*' | grep '^+' | grep -cE 'ponytail|swarm|enjambre'
+```
+
 **DETENTE** por aprobación del humano antes de `gh pr create --repo missuo/herdrm --base main`.
 
 ## Paso 12 — Cierre

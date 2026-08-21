@@ -68,6 +68,71 @@ externo produce con más gusto.
 los TUI piden mouse reporting; solo Shift+arrastre. Cualquier criterio de aceptación sobre
 selección que no diga "con Shift" es un falso negativo esperando ocurrir.
 
+## 2026-08-19 — issue #3 (copy-on-select): el auditor volvió a morir mudo, y dos sesiones se pisaron
+
+**El subagente `auditor` está roto, 2 de 2.** En el #1 murió en reposo sin veredicto. En el #3 le
+puse la mitigación que yo mismo había propuesto — «imprime `VEREDICTO PRELIMINAR: DENEGADO` como
+PRIMERA línea antes de leer nada, y reemplázalo al final» — y **volvió a entrar en reposo sin emitir
+nada**. La mitigación no funciona: el problema no es que se le olvide escribir el veredicto al final,
+es que la sesión termina sin producir salida. No gastes un tercer intento con un prompt más
+elaborado; el PM (Opus) audita y se anota. Si se quiere auditor de verdad, hay que cambiar el
+mecanismo (¿herramienta de salida estructurada obligatoria?), no el prompt.
+
+**Dos sesiones en el mismo checkout se pisan sin un solo error.** Otra sesión trabajaba el #2 en
+`~/Sites/herdrm` y se llevó el checkout compartido a `fix/ssh-tunnel-teardown-on-quit` mientras yo
+creía estar en `develop`. Lo detecté por `git worktree list` + `git status` + `git reflog`, no por un
+fallo: no hay fallo. Peor: **edité un archivo dentro de su árbol** (`.claude/commands/herdrm-flow.md`)
+y de no haberlo revertido con `git checkout --` se lo habría llevado su commit.
+
+Corregido en las instrucciones: el **Paso 3 de `herdrm-flow.md` ahora prohíbe `git switch` en el
+checkout principal** y manda `git worktree add` siempre, con censo previo obligatorio
+(`git worktree list`, `git status --short`, `git reflog -5`, `ListAgents`). Antes solo pedía worktree
+«en fleet», y ese era el hueco: un flow suelto se creía dueño del repo.
+
+**Cruce de hunks, no solo de archivos.** El #2 y el #3 comparten `HerdrMApp.swift`, lo que por la
+regla vieja los habría separado en olas distintas. Pero `git diff -U0 | grep '^@@'` mostró sus hunks
+en las líneas ~19 y ~37 y los míos en 127 y 164: **90 líneas de separación, git los mergea limpio**.
+La regla útil no es «mismo archivo, olas distintas» sino «mismo hunk, olas distintas» — con la
+excepción de `ContentView.swift` y `AppModel.swift`, donde el riesgo de re-escritura completa por un
+builder externo hace que siga valiendo un solo escritor. El `CHANGELOG.md` sí choca siempre: todos
+insertan bajo `## [Unreleased]`, y eso se resuelve a mano en 3 líneas.
+
+**Y del árbol:** el default de la feature es la parte frágil, no la lógica.
+`UserDefaults.bool(forKey:)` + `@AppStorage = true` = feature muerta que compila y pasa el gate. El
+criterio que lo caza no es un test, es un `grep` que **prohíbe** la forma incorrecta más un
+manual-gate de instalación limpia (`defaults delete` + relanzar).
+
+## 2026-08-19 — #3 detenido: dos hipótesis mías, dos veces desmentidas por los datos
+
+**La sonda importa más que el razonamiento.** Con la feature "no funcionando", razoné dos causas y
+las dos eran falsas. Lo que las mató fue instrumentar, no pensar mejor.
+
+1. **`NSLog` no llega al log unificado en esta app.** Instrumenté con `NSLog`, no vi ni una línea
+   (`log show --predicate 'eventMessage CONTAINS …'` vacío, y `process == "herdrm"` con 2464 líneas),
+   y concluí que mi `mouseUp` no se ejecutaba. **Falso**: se ejecutaba desde el principio. Una sonda
+   a fichero (`FileHandle` + append a `/tmp/cos.log`) lo destapó en un intento. Lección: para
+   preguntar «¿se ejecuta esta línea?» usa el canal más tonto posible; `NSLog` tiene demasiadas
+   maneras de no aparecer. De paso: `log` está pisado por una función del shell del usuario — hay que
+   invocar `/usr/bin/log`.
+2. **Predije que apagar *Mouse reporting* lo arreglaría; el usuario dijo «sigue igual»; y el
+   experimento nunca se había hecho.** `defaults read dev.bybee.herdrm terminal.mouseReporting`
+   devolvía `1`: el toggle seguía encendido. Al forzarlo con `defaults write` + relanzar, la feature
+   copió 935 bytes. Lección: **antes de aceptar que una predicción falló, verifica que la condición
+   del experimento se cumplió.** Un «sigue igual» sobre un experimento no ejecutado no es evidencia
+   contra la hipótesis, y casi me hace rediseñar código correcto.
+
+**El hallazgo real** (`MacTerminalView.swift:1176-1181`): `linefeed` hace `selection.selectNone()`
+cuando `allowMouseReporting` está activo, así que en un pane de agente cada línea de salida mata la
+selección y el rango llega degenerado (`start == end`) al `mouseUp` → `getSelection()` == `""`. El
+síntoma que el usuario describió — «se selecciona parcialmente y se deselecciona inmediatamente» —
+era literal y era la causa raíz, no un adorno. **Escuchar la descripción del síntoma habría llegado
+antes que mis dos hipótesis.**
+
+**Y una de proceso:** el criterio de aceptación mal redactado es tan caro como el código mal escrito.
+El gate 1 del #3 («Shift+arrastre con reporting encendido copia») es **inalcanzable** por una razón
+ajena al fix. Un builder que persiguiera ese gate habría "arreglado" código correcto hasta romperlo.
+Los criterios sobre gestos deben nombrar la configuración exacta en la que se evalúan.
+
 ## Issue #2 — teardown de túneles SSH al salir (PR upstream #11)
 
 - **`gh` resolvía el default repo a `missuo/herdrm`, no al fork.** `/herdrm-flow 2` leyó el
