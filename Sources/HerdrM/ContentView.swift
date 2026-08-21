@@ -111,6 +111,13 @@ struct DetailView: View {
                 .clipped()
                 // Losing the selected agent tears the SplitContainer down without
                 // resetting the axis, which would leave the same phantom split.
+                //
+                // Load-bearing beyond that: this is the ONLY thing that clears the axis
+                // when the agent goes away. `dismantleNSView` nils the coordinator's
+                // onExit before killing the shell, so the shell's own onExit never fires
+                // on teardown. Remove this and "split open with no agent selected"
+                // becomes reachable, which is a state a deferred focus request can be
+                // armed into with nothing left in the tree to consume it.
                 .onChange(of: model.selectedEntry?.id) { _, id in
                     if id == nil { model.shellSplitAxis = nil }
                 }

@@ -24,10 +24,14 @@ the Sparkle update description — a release without a section here fails CI.
   and closing the split hands it back to the agent. ⌘W closes the split first
   and only closes the window once it's gone. First phase of a series; keyboard
   focus/resize controls and a remote shell over SSH follow in later issues.
-- Split focus, dimming, and keyboard resize: the active pane stays at full
-  opacity while the inactive one dims to 0.55; ⌥⌘←/→ (or ↑/↓ in horizontal
-  splits) moves focus, and ⌃⌘→/← (or ↓/↑ in horizontal splits) grows or
-  shrinks the active pane in 5% steps clamped to 20%/80%. (#9)
+- The ⌘D split now shows which terminal has the keyboard and can be driven
+  without the mouse: the active pane stays at full opacity while the inactive
+  one dims. **Focus Left/Right Pane** (⌥⌘←/→) and **Focus Top/Bottom Pane**
+  (⌥⌘↑/↓) move focus directionally, so repeating a shortcut is idempotent
+  rather than toggling. **Widen/Narrow Active Pane** (⌃⌘→/←) and **Grow/Shrink
+  Active Pane** (⌃⌘↓/↑) resize in 5% steps, clamped to the same 20%/80% the
+  divider already enforces. Jumping to an agent from ⌘K or a notification puts
+  the keyboard on the agent's side. (#9)
 
 ## [0.3.9] - 2026-08-21
 
