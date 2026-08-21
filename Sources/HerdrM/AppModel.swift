@@ -258,9 +258,16 @@ final class AppModel: ObservableObject {
         selectedSpace = nil
         selectedPane = ref
         selectedShellID = nil
-        // A sheet dismissal restores the parent window's previous responder after the view
-        // tree asks for focus, so the request has to outlive this call.
-        if shellSplitAxis != nil { pendingSplitAgentFocus = true }
+        // Only the search sheet needs the deferred request: its dismissal restores the
+        // parent window's previous responder after the view tree has asked for focus.
+        // `showSearch` is still true here — SearchView calls this before dismissing.
+        //
+        // Notification clicks deliberately do NOT arm it. With the app already frontmost
+        // there may be no key-window transition at all, so nothing would consume the flag
+        // and a later unrelated activation would cash it in, pulling the keyboard out of
+        // the shell. Those clicks get focus from the recreated attach and from the
+        // entry-change request instead.
+        if shellSplitAxis != nil, showSearch { pendingSplitAgentFocus = true }
     }
 
     // MARK: - Shell terminals

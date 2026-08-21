@@ -363,6 +363,9 @@ struct DetailView: View {
                 }
             }
         } else {
+            // The .onReceive below only exists on the branch above, so a request armed
+            // while no agent is selected would have no consumer and would be cashed in by
+            // some later activation. Revealing a pane that has since gone away lands here.
             VStack(spacing: 10) {
                 Image(systemName: "terminal")
                     .font(.system(size: 28, weight: .light))
@@ -384,6 +387,7 @@ struct DetailView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.terminalBackground)
+            .onAppear { model.pendingSplitAgentFocus = false }
         }
     }
 
