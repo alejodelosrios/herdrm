@@ -219,7 +219,6 @@ struct DetailView: View {
     @AppStorage(TerminalDefaults.fontWeightKey) private var terminalFontWeight = TerminalDefaults.defaultFontWeight
     @AppStorage(TerminalDefaults.lineSpacingKey) private var terminalLineSpacing = TerminalDefaults.defaultLineSpacing
     @AppStorage("terminal.mouseReporting") private var terminalMouseReporting = true
-    @AppStorage("terminal.splitRatio") private var splitRatio = 0.5
     @Environment(\.colorScheme) private var colorScheme
     /// The entry whose attach process exited, and how. Keyed by entry id so a stale
     /// exit from a previously selected pane never covers a live terminal.
@@ -227,6 +226,7 @@ struct DetailView: View {
     @State private var endedAttachCode: Int32?
     @State private var attachRetry = 0
     @State private var uploadingAttachment = false
+    @State private var splitTracker = SplitFocusTracker()
 
     @ViewBuilder
     private var terminal: some View {
@@ -260,7 +260,11 @@ struct DetailView: View {
     @ViewBuilder
     private var agentTerminal: some View {
         if let entry = model.selectedEntry {
-            SplitContainer(axis: model.shellSplitAxis, ratio: $splitRatio) {
+            SplitContainer(
+                axis: model.shellSplitAxis,
+                activeSide: model.activeSplitSide,
+                ratio: $model.splitRatio
+            ) {
                 ZStack {
                     AttachTerminalView(
                         device: entry.device,
@@ -282,6 +286,10 @@ struct DetailView: View {
                         onExit: { code in
                             endedAttachKey = entry.id
                             endedAttachCode = code
+                        },
+                        onViewReady: {
+                            splitTracker.agentView = $0
+                            model.splitAgentView = $0
                         }
                     )
                         .id("attach-\(entry.id)-\(colorScheme)-\(attachRetry)")
@@ -300,7 +308,11 @@ struct DetailView: View {
                     lineSpacing: terminalLineSpacing,
                     dark: colorScheme == .dark,
                     mouseReporting: terminalMouseReporting,
-                    onExit: { _ in model.shellSplitAxis = nil }
+                    onExit: { _ in model.shellSplitAxis = nil },
+                    onViewReady: {
+                        splitTracker.shellView = $0
+                        model.splitShellView = $0
+                    }
                 )
                     // Deliberately not keyed on colorScheme like the attach above:
                     // a new id tears the view down and kills the shell with whatever
@@ -315,14 +327,24 @@ struct DetailView: View {
             .overlay(alignment: .bottomTrailing) {
                 if uploadingAttachment { uploadIndicator }
             }
+            .onAppear {
+                // Single source of truth: the tracker writes straight into the model
+                // instead of holding its own copy for a second onChange to mirror.
+                splitTracker.onSideChanged = { model.activeSplitSide = $0 }
+                splitTracker.start()
+            }
             .onChange(of: entry.id) { _, _ in
                 endedAttachKey = nil
                 uploadingAttachment = false
             }
             // Splitting moves the keyboard to the shell, so closing the split has to
-            // hand it back — by ⌘W or by the shell exiting on its own.
+            // hand it back — by ⌘W or by the shell exiting on its own. Reset the
+            // tracked side to the agent so the next split starts predictably.
             .onChange(of: model.shellSplitAxis) { _, axis in
-                if axis == nil { focusRemainingTerminal() }
+                if axis == nil {
+                    model.activeSplitSide = .agent
+                    focusRemainingTerminal()
+                }
             }
         } else {
             VStack(spacing: 10) {

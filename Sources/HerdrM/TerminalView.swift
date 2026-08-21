@@ -558,6 +558,9 @@ struct AttachTerminalView: NSViewRepresentable {
     /// dead session otherwise keeps its last frame and silently eats every
     /// keystroke, which reads as a freeze.
     var onExit: ((Int32?) -> Void)? = nil
+    /// Delivers the created view so a focus tracker can observe its window's
+    /// first responder without retaining the terminal itself.
+    var onViewReady: ((LocalProcessTerminalView) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -593,6 +596,7 @@ struct AttachTerminalView: NSViewRepresentable {
             guard let view, let window = view.window else { return }
             window.makeFirstResponder(view)
         }
+        onViewReady?(view)
         return view
     }
 
@@ -735,6 +739,9 @@ struct ShellTerminalView: NSViewRepresentable {
     var dark: Bool = false
     var mouseReporting: Bool = true
     var onExit: ((Int32?) -> Void)? = nil
+    /// Delivers the created view so a focus tracker can observe its window's
+    /// first responder without retaining the terminal itself.
+    var onViewReady: ((LocalProcessTerminalView) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -772,6 +779,7 @@ struct ShellTerminalView: NSViewRepresentable {
             guard let view, let window = view.window else { return }
             window.makeFirstResponder(view)
         }
+        onViewReady?(view)
         return view
     }
 

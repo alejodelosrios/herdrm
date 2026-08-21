@@ -1,5 +1,6 @@
 import Foundation
 import HerdrKit
+import SwiftTerm
 import SwiftUI
 
 enum ConnectionState: Equatable {
@@ -41,6 +42,10 @@ struct SSHAuthenticationRequest: Identifiable {
 /// vertical = panes side by side with a vertical divider (iTerm2's convention).
 enum SplitAxis { case vertical, horizontal }
 
+/// Identifies one of the two panes in the ⌘D split. Used for focus tracking and
+/// keyboard-driven resize; standalone `ShellSession`s are not part of this.
+enum SplitSide { case agent, shell }
+
 /// A standalone local shell shown as its own sidebar entry — not a herdr pane
 /// (herdr refuses to attach agent-less panes) and not the ⌘D split.
 struct ShellSession: Identifiable, Equatable {
@@ -62,6 +67,22 @@ final class AppModel: ObservableObject {
     @Published var showNewSpace = false
     @Published var showSearch = false
     @Published var shellSplitAxis: SplitAxis?
+    /// The pane that currently holds the keyboard within the ⌘D split. Reset to
+    /// the agent side whenever the split closes so reopening it is predictable.
+    @Published var activeSplitSide: SplitSide = .agent
+    /// Persisted divider ratio for the ⌘D split, shared with the resize commands.
+    /// Deliberately not `@AppStorage`: that publishes only from inside a View, so the
+    /// menu commands would write UserDefaults without ever redrawing the split.
+    @Published var splitRatio: Double =
+        UserDefaults.standard.object(forKey: AppModel.splitRatioKey) as? Double ?? 0.5
+    {
+        didSet { UserDefaults.standard.set(splitRatio, forKey: AppModel.splitRatioKey) }
+    }
+    static let splitRatioKey = "terminal.splitRatio"
+    /// Live terminal views of the ⌘D split, used by menu commands to move focus.
+    /// Held weakly so the views are not kept alive by the model.
+    weak var splitAgentView: LocalProcessTerminalView?
+    weak var splitShellView: LocalProcessTerminalView?
     /// Standalone local terminals. Their views stay alive while deselected —
     /// unlike agents, a local shell has no server side to reattach to.
     @Published var shellSessions: [ShellSession] = []

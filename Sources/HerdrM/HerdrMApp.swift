@@ -2,6 +2,7 @@ import AppKit
 import Darwin
 import HerdrKit
 import Sparkle
+import SwiftTerm
 import SwiftUI
 import UserNotifications
 
@@ -96,6 +97,37 @@ struct HerdrMApp: App {
                 Button("Split Horizontally") { focusedModel?.shellSplitAxis = .horizontal }
                     .keyboardShortcut("d", modifiers: [.command, .shift])
                     .disabled(focusedModel?.selectedEntry == nil)
+
+                Divider()
+
+                // Four commands, not eight: the shortcut follows the current axis, so the
+                // menu never shows two rows with the same name. Focus is DIRECTIONAL —
+                // ⌥⌘←/↑ always lands on the agent, ⌥⌘→/↓ always on the shell — not a
+                // toggle, so repeating a key is idempotent instead of ping-ponging.
+                Button("Focus Agent Pane") {
+                    if let model = focusedModel { focusSplitSide(.agent, in: model) }
+                }
+                .keyboardShortcut(splitIsHorizontal ? .upArrow : .leftArrow, modifiers: [.command, .option])
+                .disabled(focusedModel?.shellSplitAxis == nil)
+                Button("Focus Shell Pane") {
+                    if let model = focusedModel { focusSplitSide(.shell, in: model) }
+                }
+                .keyboardShortcut(splitIsHorizontal ? .downArrow : .rightArrow, modifiers: [.command, .option])
+                .disabled(focusedModel?.shellSplitAxis == nil)
+
+                Divider()
+
+                // Resize moves the divider by 5% relative to the active pane.
+                Button("Grow Split") {
+                    if let model = focusedModel { resizeSplit(grow: true, in: model) }
+                }
+                .keyboardShortcut(splitIsHorizontal ? .downArrow : .rightArrow, modifiers: [.command, .control])
+                .disabled(focusedModel?.shellSplitAxis == nil)
+                Button("Shrink Split") {
+                    if let model = focusedModel { resizeSplit(grow: false, in: model) }
+                }
+                .keyboardShortcut(splitIsHorizontal ? .upArrow : .leftArrow, modifiers: [.command, .control])
+                .disabled(focusedModel?.shellSplitAxis == nil)
             }
             CommandGroup(replacing: .saveItem) {
                 // ⌘W closes the most local thing first: the split, then the
@@ -130,6 +162,25 @@ struct HerdrMApp: App {
         case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
         default: NSApp.appearance = nil
         }
+    }
+
+    // MARK: - Split commands
+
+    private var splitIsHorizontal: Bool { focusedModel?.shellSplitAxis == .horizontal }
+
+    private func focusSplitSide(_ side: SplitSide, in model: AppModel) {
+        guard model.shellSplitAxis != nil else { return }
+        let target = (side == .agent) ? model.splitAgentView : model.splitShellView
+        guard let target, let window = target.window else { return }
+        window.makeFirstResponder(target)
+    }
+
+    private func resizeSplit(grow: Bool, in model: AppModel) {
+        guard model.shellSplitAxis != nil else { return }
+        let step = 0.05
+        let signed = (model.activeSplitSide == .agent) ? step : -step
+        let delta = grow ? signed : -signed
+        model.splitRatio = min(0.8, max(0.2, model.splitRatio + delta))
     }
 
     private static func runSSHAskPass() -> Never {
