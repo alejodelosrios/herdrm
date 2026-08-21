@@ -228,11 +228,6 @@ struct DetailView: View {
     @State private var attachRetry = 0
     @State private var uploadingAttachment = false
     @State private var splitTracker = SplitFocusTracker()
-    /// Set when the search sheet closes on a new agent while a split is open. Dismissing
-    /// a sheet makes AppKit restore the parent window's previous first responder — the
-    /// shell — which beats the recreated attach's own focus request. Without a split
-    /// nothing notices, because the responder it restores no longer exists.
-    @State private var pendingAgentFocus = false
 
     @ViewBuilder
     private var terminal: some View {
@@ -261,14 +256,6 @@ struct DetailView: View {
             }
         }
         .background(Theme.terminalBackground)
-    }
-
-    /// Asks for the keyboard on the agent pane twice over: right away, which is enough for
-    /// a sidebar jump, and again when the window regains key status, which is what a sheet
-    /// dismissal needs — it restores the parent's previous responder after we ask.
-    private func requestAgentFocus() {
-        pendingAgentFocus = true
-        focusTerminal(model.splitAgentView)
     }
 
     @ViewBuilder
@@ -350,19 +337,19 @@ struct DetailView: View {
             .onChange(of: entry.id) { _, _ in
                 endedAttachKey = nil
                 uploadingAttachment = false
-                if model.shellSplitAxis != nil { requestAgentFocus() }
+                if model.shellSplitAxis != nil { focusTerminal(model.splitAgentView) }
             }
-            // Keyed on the search closing, not on entry.id: picking the agent that was
-            // already selected leaves the id untouched, so an id-based trigger never fired
-            // and the shell kept the keyboard.
-            .onChange(of: model.showSearch) { wasShown, isShown in
-                if wasShown, !isShown, model.shellSplitAxis != nil { requestAgentFocus() }
-            }
-            // Deliberately keyed on the window becoming key again rather than on a delay:
-            // that is the event that follows the sheet's responder restore.
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
-                guard pendingAgentFocus else { return }
-                pendingAgentFocus = false
+            // Keyed on the window becoming key rather than on a delay: that is the event
+            // that follows the sheet's responder restore. Filtered to the terminal's own
+            // window and consumed no matter which window it was, so a pending request can
+            // never survive to a later, unrelated activation — coming back from ⌘Tab or
+            // closing Settings would otherwise yank the keyboard into a live agent.
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+                guard model.pendingSplitAgentFocus else { return }
+                model.pendingSplitAgentFocus = false
+                guard let window = note.object as? NSWindow,
+                      window === model.splitAgentView?.window
+                else { return }
                 focusTerminal(model.splitAgentView)
             }
             // Splitting moves the keyboard to the shell, so closing the split has to
@@ -371,6 +358,7 @@ struct DetailView: View {
             .onChange(of: model.shellSplitAxis) { _, axis in
                 if axis == nil {
                     model.activeSplitSide = .agent
+                    model.pendingSplitAgentFocus = false
                     focusRemainingTerminal()
                 }
             }

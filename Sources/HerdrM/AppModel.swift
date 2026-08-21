@@ -245,7 +245,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Jump target used by notification clicks.
+    /// Set by `reveal` when a jump lands while the ⌘D split is open, and consumed once the
+    /// main window is key again. Only an actual jump sets it: dismissing the search with
+    /// Escape never calls `reveal`, and the sidebar assigns `selectedPane` directly.
+    @Published var pendingSplitAgentFocus = false
+
+    /// Jump target used by the search sheet and by notification clicks.
     func reveal(_ ref: PaneRef) {
         if let filter = deviceFilter, filter != ref.deviceID {
             deviceFilter = nil
@@ -253,6 +258,9 @@ final class AppModel: ObservableObject {
         selectedSpace = nil
         selectedPane = ref
         selectedShellID = nil
+        // A sheet dismissal restores the parent window's previous responder after the view
+        // tree asks for focus, so the request has to outlive this call.
+        if shellSplitAxis != nil { pendingSplitAgentFocus = true }
     }
 
     // MARK: - Shell terminals
