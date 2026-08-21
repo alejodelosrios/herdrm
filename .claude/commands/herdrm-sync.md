@@ -154,6 +154,11 @@ git branch -f main upstream/main
 git checkout develop        # ANTES del -D: git se niega a borrar la rama en la que estas
 git branch -D develop-sync
 
+# `git branch -f main upstream/main` re-apunta el tracking de main a UPSTREAM: con eso, un
+# `git push` desde main iria al repo de missuo. Devuelvelo a origin y comprueba.
+git branch -u origin/main main
+git for-each-ref --format='%(refname:short) → %(upstream:short)' refs/heads/main refs/heads/develop
+
 # main tiene que quedar limpio de enjambre (es upstream/main puro)
 git ls-tree -r main --name-only | grep -cE '^\.(claude|swarm|opencode)/'   # debe dar 0
 # y la unica diferencia entre develop y upstream deben ser los tres directorios
