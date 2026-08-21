@@ -167,6 +167,27 @@ git diff --name-only upstream/main develop | grep -vcE '^\.(claude|swarm|opencod
 git push --force-with-lease origin develop main
 ```
 
+## 6. Retirar los backups viejos (deja solo el último)
+
+Cada sync crea un `backup/develop-pre-sync-*`. Se acumulan y dejan de ser una red de
+seguridad para volverse ruido. Conserva **solo el más reciente** y retira el resto:
+
+```sh
+# ordena por fecha de commit, no por nombre: los backups antiguos no llevan sufijo de hora
+git for-each-ref --sort=-committerdate --format='%(refname:short)' 'refs/heads/backup/develop-pre-sync*' \
+  | tail -n +2 | while read b; do
+      echo "retirando $b ($(git log -1 --format='%h %ad' --date=short "$b"))"
+      git branch -D "$b"
+    done
+git branch --list 'backup/*'   # debe quedar exactamente uno
+```
+
+Aquí `-D` es correcto y deliberado, no un descuido: un backup contiene por definición
+historia que ya NO está en `develop` (es el `develop` de antes de reconstruirlo), así que
+`-d` siempre se va a negar. La seguridad la da el patrón del `for-each-ref` —solo toca refs
+bajo `backup/develop-pre-sync*`— y el `tail -n +2`, que preserva el más reciente. Nunca
+amplíes ese glob.
+
 ## Reglas duras
 
 - `--force-with-lease`, nunca `--force` a secas — si alguien más empujó a `origin/develop`
