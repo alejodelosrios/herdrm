@@ -450,3 +450,16 @@ estructural que desaparece. Resultado: dividir mataba el `AttachTerminalView` �
 **`CommandGroup(replacing: .saveItem)` SÍ es el sitio correcto para el ⌘W.** Yo sospeché
 que quedaría duplicado con el "Close" que genera `WindowGroup`; dos auditores lo refutaron:
 `Close` vive en ese grupo junto a Save/Revert. Sospecha mía, infundada.
+
+## 2026-08-21 — el agente de opencode: `mode` decide si `--agent` lo puede usar
+
+`opencode run --agent <n>` exige un agente **primary**. Con `mode: subagent` en el frontmatter
+avisa `agent "<n>" is a subagent, not a primary agent. Falling back to default agent` y corre con
+el agente `build` por defecto — el mismo síntoma silencioso que cuando el archivo no existía,
+pero por otra causa. Tercera vez que el híbrido corre sin su agente y segunda causa distinta:
+1. el archivo no existía (`.opencode/agent/` ausente)
+2. existía con `mode: subagent`
+**Verificación única y barata**: la línea de estado del log dice `> <agente> · <modelo>`. Si dice
+`> build · …`, no está usando tu agente, diga lo que diga el resto. Comprobar SIEMPRE esa línea
+en los primeros 200 bytes del log, y el watcher debe llevar `not found|not a primary` en su
+patrón de fallo.

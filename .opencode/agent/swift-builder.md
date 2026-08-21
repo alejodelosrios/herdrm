@@ -1,6 +1,6 @@
 ---
 description: Builder Swift/SwiftUI de herdrm — motor primario de Apply. Recibe órdenes solo del PM.
-mode: subagent
+mode: primary
 model: opencode-go/kimi-k2.7-code
 temperature: 0.1
 tools:
